@@ -1,0 +1,157 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Luigi XAI Stocks</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#101722; --ink:#e6eef7; --muted:#95a4b8; --brand:#1d9bf0; --border:#1c2733; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .shell{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 600px 1fr;gap:16px}
+    .col{padding:8px}
+    .pill{display:inline-block;background:#0d141b;border:1px solid var(--border);padding:6px 10px;border-radius:999px;font-size:12px;color:var(--muted)}
+    header{position:sticky;top:0;background:rgba(11,15,20,.85);backdrop-filter: blur(10px);border-bottom:1px solid var(--border);z-index:10}
+    header .inner{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
+    header h1{font-size:18px;margin:0}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;margin:10px 0;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .card h3{margin:0 0 8px 0}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input,select{width:100%;padding:10px;border-radius:12px;border:1px solid var(--border);background:#0b141c;color:var(--ink)}
+    button{background:var(--brand);border:none;color:white;border-radius:999px;padding:10px 14px;cursor:pointer;font-weight:600}
+    button.secondary{background:#223445}
+    pre{background:#0b141c;border:1px solid var(--border);padding:10px;border-radius:12px;white-space:pre-wrap;max-height:240px;overflow:auto}
+    a{color:#7ec2ff}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .small{font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<header><div class="inner"><span class="pill">Luigi XAI</span><h1>Stocks • Batch OHLCV → Train → Explain</h1></div></header>
+<div class="shell">
+  <div class="col"></div>
+  <div class="col">
+    <div class="card">
+      <h3>Upload CSV</h3>
+      <input id="file" type="file" accept=".csv"/>
+      <div class="row">
+        <button onclick="upload()">Upload & Rebuild</button>
+        <button class="secondary" onclick="inspect()">Features & Normalization</button>
+      </div>
+      <pre id="uploadOut"></pre>
+      <pre id="inspectOut"></pre>
+      <div class="small">CSV must have: Date, Open, High, Low, Close, Volume, (optional) Symbol. If missing, Symbol = filename.</div>
+    </div>
+
+    <div class="card">
+      <h3>Bootstrap</h3>
+      <div class="row"><button onclick="bootstrap()">Engineer → Train → Predict → Rank</button></div>
+      <pre id="bootOut"></pre>
+    </div>
+
+    <div class="card grid">
+      <div>
+        <h3>Predict for Date (t+1)</h3>
+        <input id="predDate" type="date">
+        <input id="predSymbol" type="text" placeholder="(optional) SYMBOL e.g., AAPL">
+        <button onclick="predictOnDate()">Predict</button>
+        <pre id="predOnDateOut"></pre>
+      </div>
+      <div>
+        <h3>LLM Explanations</h3>
+        <select id="llmModel">
+          <option value="">Auto (env/default)</option>
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+          <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+          <option value="gpt-4o">gpt-4o</option>
+        </select>
+        <select id="llmKind">
+          <option value="data_profile">Data profile</option>
+          <option value="features">Feature extraction</option>
+          <option value="normalization">Normalization</option>
+          <option value="ranking">Ranking logic</option>
+          <option value="xai_summary">XAI summary</option>
+        </select>
+        <input id="llmSymbol" type="text" placeholder="(optional) SYMBOL e.g., AAPL">
+        <button onclick="askLLM()">Explain</button>
+        <pre id="llmOut"></pre>
+        <div class="small">If API fails or no key, responses fall back to local explanations (no cost).</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>XAI Suite (per symbol)</h3>
+      <div class="row">
+        <input id="xaiSymbol" type="text" placeholder="SYMBOL e.g., AAPL">
+        <button onclick="runLIME()">LIME</button>
+        <button class="secondary" onclick="runAnchors()">Anchors</button>
+        <button class="secondary" onclick="runDiCE()">Counterfactuals</button>
+        <button class="secondary" onclick="runEBM()">EBM</button>
+      </div>
+      <pre id="xaiOut"></pre>
+      <div class="small">Artifacts: <code>artifacts/xai/&lt;SYMBOL&gt;/</code></div>
+    </div>
+  </div>
+  <div class="col"></div>
+</div>
+
+<script>
+async function upload(){
+  const f = document.getElementById('file').files[0];
+  if(!f){ alert('Select a CSV first'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/upload_csv', {method:'POST', body:fd});
+  document.getElementById('uploadOut').textContent = await r.text();
+}
+async function inspect(){
+  const r = await fetch('/inspect/features_and_normalization');
+  document.getElementById('inspectOut').textContent = await r.text();
+}
+async function bootstrap(){
+  const r = await fetch('/bootstrap', {method:'POST'});
+  document.getElementById('bootOut').textContent = await r.text();
+}
+async function predictOnDate(){
+  const d = document.getElementById('predDate').value;
+  if(!d){ alert('Pick a date'); return; }
+  const s = document.getElementById('predSymbol').value.trim();
+  const q = s ? `/predict_on_date?date=${d}&symbol=${encodeURIComponent(s)}` : `/predict_on_date?date=${d}`;
+  const r = await fetch(q);
+  document.getElementById('predOnDateOut').textContent = await r.text();
+}
+async function askLLM(){
+  const kind = document.getElementById('llmKind').value;
+  const sym = document.getElementById('llmSymbol').value.trim();
+  const model = document.getElementById('llmModel').value;
+  const url = model ? `/llm/explain?model=${encodeURIComponent(model)}` : '/llm/explain';
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind:kind, symbol: sym || null})});
+  document.getElementById('llmOut').textContent = await r.text();
+}
+async function runLIME(){
+  const s = document.getElementById('xaiSymbol').value.trim();
+  if(!s){ alert('Enter SYMBOL'); return; }
+  const r = await fetch(`/xai/lime/${encodeURIComponent(s)}`);
+  document.getElementById('xaiOut').textContent = await r.text();
+}
+async function runAnchors(){
+  const s = document.getElementById('xaiSymbol').value.trim();
+  if(!s){ alert('Enter SYMBOL'); return; }
+  const r = await fetch(`/xai/anchors/${encodeURIComponent(s)}`);
+  document.getElementById('xaiOut').textContent = await r.text();
+}
+async function runDiCE(){
+  const s = document.getElementById('xaiSymbol').value.trim();
+  if(!s){ alert('Enter SYMBOL'); return; }
+  const r = await fetch(`/xai/dice/${encodeURIComponent(s)}?total_CFs=3&desired_class=1`);
+  document.getElementById('xaiOut').textContent = await r.text();
+}
+async function runEBM(){
+  const s = document.getElementById('xaiSymbol').value.trim();
+  if(!s){ alert('Enter SYMBOL'); return; }
+  const r = await fetch(`/xai/ebm/${encodeURIComponent(s)}`);
+  document.getElementById('xaiOut').textContent = await r.text();
+}
+</script>
+</body>
+</html>
